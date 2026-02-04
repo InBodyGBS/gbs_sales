@@ -3,9 +3,5 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "framework": "nextjs",
-  "regions": ["icn1"],
-  "env": {
-    "NEXT_PUBLIC_APP_NAME": "@next_public_app_name",
-    "NEXT_PUBLIC_MAX_FILE_SIZE": "@next_public_max_file_size"
-  }
+  "regions": ["icn1"]
 }
