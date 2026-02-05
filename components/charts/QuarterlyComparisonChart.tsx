@@ -19,7 +19,7 @@ interface QuarterlyComparisonChartProps {
 }
 
 export function QuarterlyComparisonChart({ data, currentYear, loading, entity }: QuarterlyComparisonChartProps) {
-  const isHQ = entity === 'HQ';
+  const isKRWEntity = entity && ['HQ', 'Healthcare', 'Korot'].includes(entity);
   if (loading) {
     return (
       <Card>
@@ -76,10 +76,10 @@ export function QuarterlyComparisonChart({ data, currentYear, loading, entity }:
             <XAxis dataKey="quarter" />
             <YAxis
               domain={yAxisDomain}
-              tickFormatter={(value) => isHQ ? formatKRW(value) : formatCurrency(value, 'USD')}
+              tickFormatter={(value) => isKRWEntity ? formatKRW(value) : formatCurrency(value, 'USD')}
             />
             <Tooltip
-              formatter={(value: number) => isHQ ? formatKRW(value) : formatCurrency(value, 'USD')}
+              formatter={(value: number) => isKRWEntity ? formatKRW(value) : formatCurrency(value, 'USD')}
             />
             <Legend />
             <Bar

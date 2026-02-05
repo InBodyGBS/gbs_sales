@@ -21,12 +21,12 @@ interface KPICardsProps {
 }
 
 export function KPICards({ data, loading, entity }: KPICardsProps) {
-  const isHQ = entity === 'HQ';
+  const isKRWEntity = entity && ['HQ', 'Healthcare', 'Korot'].includes(entity);
   
   if (loading) {
-    const cardCount = isHQ ? 1 : 4;
+    const cardCount = isKRWEntity ? 1 : 4;
     return (
-      <div className={`grid gap-4 ${isHQ ? 'md:grid-cols-1' : 'md:grid-cols-2 lg:grid-cols-4'}`}>
+      <div className={`grid gap-4 ${isKRWEntity ? 'md:grid-cols-1' : 'md:grid-cols-2 lg:grid-cols-4'}`}>
         {Array.from({ length: cardCount }).map((_, i) => (
           <Card key={i}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -47,8 +47,8 @@ export function KPICards({ data, loading, entity }: KPICardsProps) {
     return null;
   }
 
-  // For HQ, only show Total Amount with KRW format (no currency symbol)
-  if (isHQ) {
+  // For HQ, Healthcare, Korot: only show Total Amount with KRW format (no currency symbol)
+  if (isKRWEntity) {
     return (
       <div className="grid gap-4 md:grid-cols-1">
         <Card>
