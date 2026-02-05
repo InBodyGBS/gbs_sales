@@ -58,8 +58,7 @@ export function QuarterlyComparisonChart({ data, currentYear, loading, entity }:
 
   // Calculate max value for better Y-axis scaling
   const maxValue = Math.max(
-    ...chartData.flatMap((d) => [d[currentYear.toString()] || 0, d[(currentYear - 1).toString()] || 0]),
-    0
+    ...chartData.flatMap((d) => [Number(d[currentYear.toString()]) || 0, Number(d[(currentYear - 1).toString()]) || 0]),
   );
   const yAxisDomain = [0, maxValue * 1.1]; // Add 10% padding
 
