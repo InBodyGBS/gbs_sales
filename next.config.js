@@ -1,8 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
+  // App Router doesn't use api.bodyParser config
+  // Body size is handled by Vercel deployment settings
   experimental: {
-    serverActions: true,
+    serverActions: {
+      bodySizeLimit: '100mb',
+    },
   },
 }
 

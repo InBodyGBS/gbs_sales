@@ -3,5 +3,11 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "framework": "nextjs",
-  "regions": ["icn1"]
+  "regions": ["icn1"],
+  "functions": {
+    "app/api/upload/route.ts": {
+      "maxDuration": 300,
+      "memory": 3008
+    }
+  }
 }

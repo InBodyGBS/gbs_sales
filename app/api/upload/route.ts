@@ -1,392 +1,476 @@
+// app/api/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceClient } from '@/lib/supabase/server';
-import { parseExcelBuffer } from '@/lib/utils/excel-parser';
-import { validateExcelData } from '@/lib/utils/data-validator';
-import { getQuarterFromDate, getYearFromDate } from '@/lib/utils/formatters';
-import { Entity, ExcelRow } from '@/lib/types/sales';
 import * as XLSX from 'xlsx';
+import { createServiceClient } from '@/lib/supabase/server';
+import { v4 as uuidv4 } from 'uuid';
 
-const MAX_FILE_SIZE = parseInt(process.env.NEXT_PUBLIC_MAX_FILE_SIZE || '104857600'); // 100MB
-
-function parseDate(value: string | number): Date {
-  if (typeof value === 'number') {
-    // Excel date serial number
-    const excelEpoch = new Date(1899, 11, 30);
-    return new Date(excelEpoch.getTime() + value * 86400000);
-  }
-  return new Date(value);
-}
-
-function parseNumber(value: string | number): number {
-  if (typeof value === 'number') return value;
-  const cleaned = String(value).replace(/[^\d.-]/g, '');
-  return parseFloat(cleaned) || 0;
-}
+// Route Segment Config for larger file uploads
+export const runtime = 'nodejs';
+export const maxDuration = 300; // 5 minutes (Vercel Pro allows up to 300s)
 
 export async function POST(request: NextRequest) {
+  let batchId = '';
+  
   try {
+    console.log('📥 Upload request received');
+
+    // 1. Supabase 클라이언트 생성
+    const supabase = createServiceClient();
+
+    // 2. FormData 파싱
     const formData = await request.formData();
     const file = formData.get('file') as File;
-    const entity = formData.get('entity') as Entity;
+    const entity = formData.get('entity') as string;
 
-    console.log('Upload request received:', {
-      fileName: file?.name,
-      fileSize: file?.size,
-      fileType: file?.type,
-      entity: entity,
-    });
+    console.log('📄 File:', file?.name, '| Size:', file?.size);
+    console.log('🏢 Entity:', entity);
 
+    // 3. 기본 검증
     if (!file) {
-      console.error('No file provided');
       return NextResponse.json(
-        { error: 'No file provided' },
+        { success: false, error: 'No file provided' },
         { status: 400 }
       );
     }
 
-    if (!entity || entity === 'All') {
-      console.error('Invalid entity:', entity);
+    if (!entity) {
       return NextResponse.json(
-        { error: 'Please select a specific entity (HQ, USA, BWA, Vietnam, Healthcare, or Korot)' },
+        { success: false, error: 'No entity selected' },
         { status: 400 }
       );
     }
 
-    // Check file size
+    const validEntities = ['HQ', 'USA', 'BWA', 'Vietnam', 'Healthcare', 'Korot'];
+    if (!validEntities.includes(entity)) {
+      return NextResponse.json(
+        { success: false, error: `Invalid entity: ${entity}` },
+        { status: 400 }
+      );
+    }
+
+    // 4. 파일 크기 제한 (50MB)
+    const MAX_FILE_SIZE = 50 * 1024 * 1024;
     if (file.size > MAX_FILE_SIZE) {
-      console.error('File size exceeds limit:', file.size, MAX_FILE_SIZE);
       return NextResponse.json(
-        { error: `File size exceeds maximum limit of ${MAX_FILE_SIZE / 1024 / 1024}MB` },
+        { success: false, error: 'File too large. Maximum size is 50MB.' },
         { status: 400 }
       );
     }
 
-    // Check file type - be more flexible with file extensions
-    const fileName = file.name.toLowerCase();
-    const validExtensions = ['.xlsx', '.xls'];
-    const hasValidExtension = validExtensions.some(ext => fileName.endsWith(ext));
-    
+    // 5. 파일 타입 검증
     const validTypes = [
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-excel',
-      'application/excel',
-      'application/x-excel',
+      'application/vnd.ms-excel'
     ];
-    
-    if (!hasValidExtension && !validTypes.includes(file.type)) {
-      console.error('Invalid file type:', file.type, fileName);
+    if (!validTypes.includes(file.type)) {
       return NextResponse.json(
-        { 
-          error: 'Invalid file type. Please upload .xlsx or .xls file',
-          details: `File type: ${file.type || 'unknown'}, File name: ${file.name}`
-        },
+        { success: false, error: 'Invalid file type. Only .xlsx and .xls files are allowed.' },
         { status: 400 }
       );
     }
 
-    // Parse Excel file
+    // 6. 파일을 Buffer로 변환
+    console.log('🔄 Converting file to buffer...');
     const arrayBuffer = await file.arrayBuffer();
-    const excelData = parseExcelBuffer(arrayBuffer);
+    const buffer = Buffer.from(arrayBuffer);
 
-    // Validate data
-    if (!excelData || excelData.length === 0) {
-      console.error('Excel file is empty or could not be parsed');
-      return NextResponse.json(
-        { error: 'Excel file is empty or could not be parsed. Please check the file format.' },
-        { status: 400 }
-      );
-    }
-
-    const validation = validateExcelData(excelData, entity);
-    if (!validation.valid) {
-      console.error('Data validation failed:', validation.errors);
+    // 7. 엑셀 파일 파싱
+    console.log('📊 Parsing Excel file...');
+    let workbook: XLSX.WorkBook;
+    
+    try {
+      workbook = XLSX.read(buffer, { 
+        type: 'buffer',
+        cellDates: true,
+        cellNF: false,
+        cellText: false
+      });
+    } catch (parseError: any) {
+      console.error('❌ Excel parsing error:', parseError);
       return NextResponse.json(
         { 
-          error: 'Data validation failed',
-          details: validation.errors 
+          success: false, 
+          error: 'Failed to parse Excel file',
+          details: parseError.message 
         },
         { status: 400 }
       );
     }
 
-    // Generate batch ID
-    const batchId = crypto.randomUUID();
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const rawData: any[] = XLSX.utils.sheet_to_json(worksheet, { 
+      raw: false,
+      defval: null
+    });
 
-    // Transform data for database
-    const supabase = await createServiceClient();
-    
-    // First, verify the table exists and get column info
-    const { data: tableInfo, error: tableError } = await supabase
-      .from('sales_data')
-      .select('*')
-      .limit(0);
-    
-    if (tableError && tableError.code === '42P01') {
+    console.log(`✅ Parsed ${rawData.length} rows from sheet: ${sheetName}`);
+
+    if (rawData.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'Excel file is empty' },
+        { status: 400 }
+      );
+    }
+
+    // 8. 데이터 변환
+    console.log('🔄 Transforming data...');
+    const transformedData: any[] = [];
+    const errors: string[] = [];
+
+    for (let i = 0; i < rawData.length; i++) {
+      const row = rawData[i];
+      const rowNum = i + 2;
+
+      try {
+        // Invoice date 파싱
+        let invoiceDate = null;
+        let year = null;
+        let quarter = null;
+
+        if (row['Invoice date']) {
+          try {
+            const dateValue = row['Invoice date'];
+            let parsedDate: Date;
+
+            if (typeof dateValue === 'number') {
+              // Excel serial date
+              const excelEpoch = new Date(1899, 11, 30);
+              parsedDate = new Date(excelEpoch.getTime() + dateValue * 86400000);
+            } else if (typeof dateValue === 'string') {
+              parsedDate = new Date(dateValue);
+            } else if (dateValue instanceof Date) {
+              parsedDate = dateValue;
+            } else {
+              throw new Error('Invalid date type');
+            }
+
+            if (!isNaN(parsedDate.getTime())) {
+              invoiceDate = parsedDate.toISOString().split('T')[0];
+              year = parsedDate.getFullYear();
+              quarter = `Q${Math.floor(parsedDate.getMonth() / 3) + 1}`;
+            }
+          } catch (dateError) {
+            console.warn(`Row ${rowNum}: Invalid invoice date: ${row['Invoice date']}`);
+          }
+        }
+
+        // Due date 파싱
+        let dueDate = null;
+        if (row['Due date']) {
+          try {
+            const dateValue = row['Due date'];
+            let parsedDate: Date;
+
+            if (typeof dateValue === 'number') {
+              const excelEpoch = new Date(1899, 11, 30);
+              parsedDate = new Date(excelEpoch.getTime() + dateValue * 86400000);
+            } else if (typeof dateValue === 'string') {
+              parsedDate = new Date(dateValue);
+            } else if (dateValue instanceof Date) {
+              parsedDate = dateValue;
+            } else {
+              throw new Error('Invalid date type');
+            }
+
+            if (!isNaN(parsedDate.getTime())) {
+              dueDate = parsedDate.toISOString().split('T')[0];
+            }
+          } catch (dateError) {
+            console.warn(`Row ${rowNum}: Invalid due date: ${row['Due date']}`);
+          }
+        }
+
+        // CREATEDDATE 파싱
+        let createdDate = null;
+        if (row['CREATEDDATE']) {
+          try {
+            const dateValue = row['CREATEDDATE'];
+            let parsedDate: Date;
+
+            if (typeof dateValue === 'number') {
+              const excelEpoch = new Date(1899, 11, 30);
+              parsedDate = new Date(excelEpoch.getTime() + dateValue * 86400000);
+            } else if (typeof dateValue === 'string') {
+              parsedDate = new Date(dateValue);
+            } else if (dateValue instanceof Date) {
+              parsedDate = dateValue;
+            } else {
+              throw new Error('Invalid date type');
+            }
+
+            if (!isNaN(parsedDate.getTime())) {
+              createdDate = parsedDate.toISOString();
+            }
+          } catch (dateError) {
+            console.warn(`Row ${rowNum}: Invalid created date`);
+          }
+        }
+
+        // 숫자 필드 파싱 함수
+        const parseNumber = (value: any): number | null => {
+          if (value === null || value === undefined || value === '') return null;
+          const num = typeof value === 'string' ? parseFloat(value.replace(/[^0-9.-]/g, '')) : parseFloat(value);
+          return isNaN(num) ? null : num;
+        };
+
+        // 데이터 매핑
+        const mappedRow = {
+          entity,
+          year,
+          quarter,
+          
+          // Original Excel columns
+          sales_type: row['Sales Type'] || null,
+          invoice: row['Invoice'] || null,
+          voucher: row['Voucher'] || null,
+          invoice_date: invoiceDate,
+          pool: row['Pool'] || null,
+          supply_method: row['Supply method'] || null,
+          sub_method_1: row['Sub Method - 1'] || null,
+          sub_method_2: row['Sub Method - 2'] || null,
+          sub_method_3: row['Sub Method - 3'] || null,
+          application: row['Application'] || null,
+          industry: row['Industry'] || null,
+          sub_industry_1: row['Sub Industry - 1'] || null,
+          sub_industry_2: row['Sub Industry - 2'] || null,
+          general_group: row['General group'] || null,
+          sales_order: row['Sales order'] || null,
+          account_number: row['Account number'] || null,
+          name: row['Name'] || null,
+          name2: row['Name2'] || null,
+          customer_invoice_account: row['Customer invoice account'] || null,
+          invoice_account: row['Invoice account'] || null,
+          group: row['Group'] || null,
+          currency: row['Currency'] || null,
+          invoice_amount: parseNumber(row['Invoice Amount']),
+          invoice_amount_mst: parseNumber(row['Invoice Amount_MST']),
+          sales_tax_amount: parseNumber(row['Sales tax amount']),
+          sales_tax_amount_accounting: parseNumber(row['The sales tax amount, in the accounting currency']),
+          total_for_invoice: parseNumber(row['Total for invoice']),
+          total_mst: parseNumber(row['Total_MST']),
+          open_balance: parseNumber(row['Open balance']),
+          due_date: dueDate,
+          sales_tax_group: row['Sales tax group'] || null,
+          payment_type: row['Payment type'] || null,
+          terms_of_payment: row['Terms of payment'] || null,
+          payment_schedule: row['Payment schedule'] || null,
+          method_of_payment: row['Method of payment'] || null,
+          posting_profile: row['Posting profile'] || null,
+          delivery_terms: row['Delivery terms'] || null,
+          h_dim_wk: row['H_DIM_WK'] || null,
+          h_wk_name: row['H_WK_NAME'] || null,
+          h_dim_cc: row['H_DIM_CC'] || null,
+          h_dim_name: row['H_DIM_NAME'] || null,
+          line_number: parseNumber(row['Line number']),
+          street: row['Street'] || null,
+          city: row['City'] || null,
+          state: row['State'] || null,
+          zip_postal_code: row['ZIP/postal code'] || null,
+          final_zipcode: row['Final ZipCode'] || null,
+          region: row['Region'] || null,
+          product_type: row['Product type'] || null,
+          item_group: row['Item group'] || null,
+          category: row['Category'] || null,
+          model: row['Model'] || null,
+          item_number: row['Item number'] || null,
+          product_name: row['Product name'] || null,
+          text: row['Text'] || null,
+          warehouse: row['Warehouse'] || null,
+          name3: row['Name3'] || null,
+          quantity: parseNumber(row['Quantity']),
+          inventory_unit: row['Inventory unit'] || null,
+          price_unit: parseNumber(row['Price unit']),
+          net_amount: parseNumber(row['Net amount']),
+          line_amount_mst: parseNumber(row['Line Amount_MST']),
+          sales_tax_group2: row['Sales tax group2'] || null,
+          tax_item_group: row['TaxItemGroup'] || null,
+          mode_of_delivery: row['Mode of delivery'] || null,
+          dlv_detail: row['Dlv Detail'] || null,
+          online_order: row['Online order'] || null,
+          sales_channel: row['Sales channel'] || null,
+          promotion: row['Promotion'] || null,
+          second_sales: row['2nd Sales'] || null,
+          personnel_number: row['Personnel number'] || null,
+          worker_name: row['WORKERNAME'] || null,
+          l_dim_name: row['L_DIM_NAME'] || null,
+          l_dim_wk: row['L_DIM_WK'] || null,
+          l_wk_name: row['L_WK_NAME'] || null,
+          l_dim_cc: row['L_DIM_CC'] || null,
+          main_account: row['Main account'] || null,
+          account_name: row['Account name'] || null,
+          rebate: parseNumber(row['Rebate']),
+          description: row['Description'] || null,
+          country: row['Country'] || null,
+          created_date: createdDate,
+          created_by: row['CREATEDBY'] || null,
+          exception: row['Exception'] || null,
+          with_collection_agency: row['With collection agency'] || null,
+          credit_rating: row['Credit rating'] || null,
+          
+          upload_batch_id: batchId
+        };
+
+        transformedData.push(mappedRow);
+
+      } catch (validationError: any) {
+        errors.push(`Row ${rowNum}: ${validationError.message}`);
+        if (errors.length >= 10) {
+          errors.push('... (showing first 10 errors)');
+          break;
+        }
+      }
+    }
+
+    if (errors.length > 0 && transformedData.length === 0) {
+      console.error('❌ All data validation failed:', errors);
       return NextResponse.json(
         { 
-          error: 'Database table not found',
-          details: 'The sales_data table does not exist. Please run the database schema from database/schema.sql in your Supabase SQL Editor.',
-          hint: 'Go to Supabase Dashboard → SQL Editor → New Query → Paste schema.sql content → Run'
+          success: false, 
+          error: 'Data validation failed',
+          details: errors
+        },
+        { status: 400 }
+      );
+    }
+
+    console.log(`✅ Transformed ${transformedData.length} rows (${errors.length} errors skipped)`);
+
+    // 9. Batch ID 생성
+    batchId = uuidv4();
+    console.log('🆔 Batch ID:', batchId);
+
+    // Batch ID를 모든 행에 추가
+    transformedData.forEach(row => row.upload_batch_id = batchId);
+
+    // 10. Upload history 기록
+    console.log('💾 Creating upload history...');
+    const { error: historyError } = await supabase
+      .from('upload_history')
+      .insert({
+        batch_id: batchId,
+        entity,
+        file_name: file.name,
+        rows_uploaded: transformedData.length,
+        status: 'processing'
+      });
+
+    if (historyError) {
+      console.error('❌ Upload history error:', historyError);
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Database error',
+          details: historyError.message
         },
         { status: 500 }
       );
     }
 
-    // Helper function to convert Excel column names to DB column names (snake_case)
-    const toSnakeCase = (str: string): string => {
-      return str
-        .replace(/\s+/g, '_')
-        .replace(/-/g, '_')
-        .replace(/[()]/g, '')
-        .replace(/\//g, '_')
-        .toLowerCase();
-    };
+    // 11. 데이터 삽입
+    console.log('💾 Inserting data...');
+    const CHUNK_SIZE = 500; // 한 번에 500개씩
+    let totalInserted = 0;
 
-    // Helper function to get value from row (case-insensitive)
-    const getValue = (row: ExcelRow, columnName: string): any => {
-      // Try exact match first
-      if (row[columnName] !== undefined) return row[columnName];
-      
-      // Try case-insensitive match
-      const keys = Object.keys(row);
-      const matchedKey = keys.find(k => k.toLowerCase() === columnName.toLowerCase());
-      if (matchedKey) return row[matchedKey];
-      
-      return null;
-    };
+    for (let i = 0; i < transformedData.length; i += CHUNK_SIZE) {
+      const chunk = transformedData.slice(i, i + CHUNK_SIZE);
+      const { error: insertError } = await supabase
+        .from('sales_data')
+        .insert(chunk);
 
-    // Helper function to parse date
-    const parseDateValue = (value: any): Date | null => {
-      if (!value) return null;
-      if (value instanceof Date) return value;
-      if (typeof value === 'number') {
-        const excelEpoch = new Date(1899, 11, 30);
-        return new Date(excelEpoch.getTime() + value * 86400000);
+      if (insertError) {
+        console.error('❌ Insert error:', insertError);
+        
+        // 실패 시 history 업데이트
+        await supabase
+          .from('upload_history')
+          .update({ 
+            status: 'failed',
+            error_message: insertError.message 
+          })
+          .eq('batch_id', batchId);
+
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: 'Database insert failed',
+            details: insertError.message,
+            hint: insertError.hint
+          },
+          { status: 500 }
+        );
       }
-      const date = new Date(value);
-      return isNaN(date.getTime()) ? null : date;
-    };
 
-    const salesData = excelData
-      .map((row: ExcelRow, index: number) => {
-        try {
-          // Get invoice date for year/quarter calculation
-          const invoiceDateValue = getValue(row, 'Invoice date') || getValue(row, 'Date');
-          const invoiceDate = parseDateValue(invoiceDateValue);
-          
-          let year: number | null = null;
-          let quarter: string | null = null;
-          
-          if (invoiceDate) {
-            year = getYearFromDate(invoiceDate);
-            quarter = getQuarterFromDate(invoiceDate);
-          }
-
-          // Build data object with all original columns
-          const dbRow: any = {
-            // Added columns
-            entity,
-            year,
-            quarter,
-            upload_batch_id: batchId,
-          };
-
-          // Map all original Excel columns to DB columns
-          const columnMapping: { [excelCol: string]: string } = {
-            'Sales Type': 'sales_type',
-            'Invoice': 'invoice',
-            'Voucher': 'voucher',
-            'Invoice date': 'invoice_date',
-            'Pool': 'pool',
-            'Supply method': 'supply_method',
-            'Sub Method - 1': 'sub_method_1',
-            'Sub Method - 2': 'sub_method_2',
-            'Sub Method - 3': 'sub_method_3',
-            'Application': 'application',
-            'Industry': 'industry',
-            'Sub Industry - 1': 'sub_industry_1',
-            'Sub Industry - 2': 'sub_industry_2',
-            'General group': 'general_group',
-            'Sales order': 'sales_order',
-            'Account number': 'account_number',
-            'Name': 'name',
-            'Name2': 'name2',
-            'Customer invoice account': 'customer_invoice_account',
-            'Invoice account': 'invoice_account',
-            'Group': 'group',
-            'Currency': 'currency',
-            'Invoice Amount': 'invoice_amount',
-            'Invoice Amount_MST': 'invoice_amount_mst',
-            'Sales tax amount': 'sales_tax_amount',
-            'The sales tax amount, in the accounting currency': 'sales_tax_amount_accounting',
-            'Total for invoice': 'total_for_invoice',
-            'Total_MST': 'total_mst',
-            'Open balance': 'open_balance',
-            'Due date': 'due_date',
-            'Sales tax group': 'sales_tax_group',
-            'Payment type': 'payment_type',
-            'Terms of payment': 'terms_of_payment',
-            'Payment schedule': 'payment_schedule',
-            'Method of payment': 'method_of_payment',
-            'Posting profile': 'posting_profile',
-            'Delivery terms': 'delivery_terms',
-            'H_DIM_WK': 'h_dim_wk',
-            'H_WK_NAME': 'h_wk_name',
-            'H_DIM_CC': 'h_dim_cc',
-            'H DIM NAME': 'h_dim_name',
-            'Line number': 'line_number',
-            'Street': 'street',
-            'City': 'city',
-            'State': 'state',
-            'ZIP/postal code': 'zip_postal_code',
-            'Final ZipCode': 'final_zipcode',
-            'Region': 'region',
-            'Product type': 'product_type',
-            'Item group': 'item_group',
-            'Category': 'category',
-            'Model': 'model',
-            'Item number': 'item_number',
-            'Product name': 'product_name',
-            'Text': 'text',
-            'Warehouse': 'warehouse',
-            'Name3': 'name3',
-            'Quantity': 'quantity',
-            'Inventory unit': 'inventory_unit',
-            'Price unit': 'price_unit',
-            'Net amount': 'net_amount',
-            'Line Amount_MST': 'line_amount_mst',
-            'Sales tax group2': 'sales_tax_group2',
-            'TaxItemGroup': 'tax_item_group',
-            'Mode of delivery': 'mode_of_delivery',
-            'Dlv Detail': 'dlv_detail',
-            'Online order': 'online_order',
-            'Sales channel': 'sales_channel',
-            'Promotion': 'promotion',
-            '2nd Sales': 'second_sales',
-            'Personnel number': 'personnel_number',
-            'WORKERNAME': 'worker_name',
-            'L DIM NAME': 'l_dim_name',
-            'L_DIM_WK': 'l_dim_wk',
-            'L_WK_NAME': 'l_wk_name',
-            'L_DIM_CC': 'l_dim_cc',
-            'Main account': 'main_account',
-            'Account name': 'account_name',
-            'Rebate': 'rebate',
-            'Description': 'description',
-            'Country': 'country',
-            'CREATEDDATE': 'created_date',
-            'CREATEDBY': 'created_by',
-            'Exception': 'exception',
-            'With collection agency': 'with_collection_agency',
-            'Credit rating': 'credit_rating',
-          };
-
-          // Process each column
-          Object.keys(columnMapping).forEach((excelCol) => {
-            const dbCol = columnMapping[excelCol];
-            let value = getValue(row, excelCol);
-            
-            // Handle date columns
-            if (dbCol.includes('_date') || dbCol === 'created_date') {
-              const dateValue = parseDateValue(value);
-              dbRow[dbCol] = dateValue ? dateValue.toISOString().split('T')[0] : null;
-            }
-            // Handle numeric columns
-            else if (dbCol.includes('amount') || dbCol.includes('balance') || 
-                     dbCol.includes('quantity') || dbCol === 'line_number' || 
-                     dbCol === 'price_unit' || dbCol === 'rebate') {
-              const numValue = parseNumber(value);
-              dbRow[dbCol] = isNaN(numValue) ? null : numValue;
-            }
-            // Handle text columns
-            else {
-              dbRow[dbCol] = value !== null && value !== undefined ? String(value).trim() : null;
-            }
-          });
-
-          return dbRow;
-        } catch (err) {
-          console.error(`Error processing row ${index + 2}:`, err);
-          return null;
-        }
-      })
-      .filter((row): row is NonNullable<typeof row> => row !== null);
-
-    // Check for duplicates and insert
-    let rowsInserted = 0;
-    const errors: string[] = [];
-
-    // Try batch insert first (more efficient)
-    if (salesData.length > 0) {
-      try {
-        const { data, error: batchError } = await supabase
-          .from('sales_data')
-          .insert(salesData)
-          .select();
-
-        if (batchError) {
-          console.error('Batch insert error:', batchError);
-          
-          // If batch insert fails, try individual inserts to get specific errors
-          console.log('Falling back to individual inserts...');
-          for (let i = 0; i < salesData.length; i++) {
-            const row = salesData[i];
-            try {
-              const { error: insertError } = await supabase
-                .from('sales_data')
-                .insert(row);
-              
-              if (insertError) {
-                errors.push(`Row ${i + 2}: ${insertError.message}${insertError.details ? ` (${insertError.details})` : ''}${insertError.hint ? ` - Hint: ${insertError.hint}` : ''}`);
-                console.error(`Row ${i + 2} insert error:`, insertError);
-              } else {
-                rowsInserted++;
-              }
-            } catch (err) {
-              errors.push(`Row ${i + 2}: ${(err as Error).message}`);
-            }
-          }
-        } else {
-          rowsInserted = data?.length || 0;
-        }
-      } catch (err) {
-        console.error('Insert error:', err);
-        errors.push(`Failed to insert data: ${(err as Error).message}`);
-      }
+      totalInserted += chunk.length;
+      console.log(`✅ Inserted ${totalInserted}/${transformedData.length} rows`);
     }
 
-    // Save upload history
-    const { error: historyError } = await supabase.from('upload_history').insert({
-      batch_id: batchId,
-      entity,
-      file_name: file.name,
-      file_path: null, // Can be updated if storing in Supabase Storage
-      rows_uploaded: rowsInserted,
-      status: errors.length > 0 ? 'partial' : 'success',
-      error_message: errors.length > 0 ? errors.join('; ') : null,
-    });
+    // 12. Upload history 완료 업데이트
+    await supabase
+      .from('upload_history')
+      .update({ status: 'completed' })
+      .eq('batch_id', batchId);
 
-    if (historyError) {
-      console.error('Error saving upload history:', historyError);
-    }
+    console.log('✅ Upload completed successfully');
 
+    // 13. 성공 응답
     return NextResponse.json({
       success: true,
       batchId,
-      rowsInserted,
-      totalRows: salesData.length,
-      errors: errors.length > 0 ? errors : undefined,
+      rowsInserted: totalInserted,
+      rowsSkipped: errors.length,
+      entity,
+      fileName: file.name
     });
-  } catch (error) {
-    console.error('Upload error:', error);
-    const errorMessage = (error as Error).message || 'Unknown error occurred';
+
+  } catch (error: any) {
+    console.error('❌ Unexpected error:', error);
+    
+    if (batchId) {
+      try {
+        const supabase = createServiceClient();
+        await supabase
+          .from('upload_history')
+          .update({ 
+            status: 'failed',
+            error_message: error.message 
+          })
+          .eq('batch_id', batchId);
+      } catch (updateError) {
+        console.error('Failed to update history:', updateError);
+      }
+    }
+
     return NextResponse.json(
       { 
-        error: 'Failed to process upload',
-        details: errorMessage,
-        stack: process.env.NODE_ENV === 'development' ? (error as Error).stack : undefined
+        success: false, 
+        error: 'Internal server error',
+        details: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
       },
       { status: 500 }
     );
+  }
+}
+
+// GET: 업로드 히스토리 조회
+export async function GET() {
+  try {
+    const supabase = createServiceClient();
+
+    const { data, error } = await supabase
+      .from('upload_history')
+      .select('*')
+      .order('uploaded_at', { ascending: false })
+      .limit(20);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ history: data });
+
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
