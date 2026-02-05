@@ -100,8 +100,16 @@ export function FileUploader({ entity, onUploadSuccess }: FileUploaderProps) {
       toast.dismiss('upload');
       
       if (result.success) {
+        // 상세 로그 출력
+        console.log('✅ 업로드 성공!');
+        console.log(`📊 원본: ${result.data.originalRows}개 행`);
+        console.log(`💾 저장: ${result.data.filteredRows}개 행`);
+        console.log(`🗑️ 제거된 컬럼: ${result.data.columnsRemoved}개`);
+        console.log(`📉 용량 절감: ${result.data.spaceReduction}`);
+        console.log(`📁 저장 경로: ${result.data.storagePath}`);
+
         toast.success(
-          `Successfully uploaded ${result.rowsInserted} rows from ${file.name}`
+          `Successfully uploaded ${result.rowsInserted} rows from ${file.name} (${result.data.spaceReduction} size reduced)`
         );
 
         if (onUploadSuccess) {
