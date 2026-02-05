@@ -205,7 +205,7 @@ export function FileUploader({ entity, onUploadSuccess }: FileUploaderProps) {
               <div>
                 <p className="text-sm font-medium">Uploading {uploadedFile?.name}...</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  데이터 import 중입니다. 몇 분 정도 소요될 수 있습니다.
+                  Data import in progress. This may take several minutes.
                 </p>
                 <Progress value={progress} className="mt-2" />
                 <p className="text-xs text-muted-foreground mt-2">{progress}%</p>
