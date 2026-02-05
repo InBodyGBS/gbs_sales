@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Upload, File, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Entity } from '@/lib/types/sales';
+import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 
 interface FileUploaderProps {
@@ -46,27 +47,42 @@ export function FileUploader({ entity, onUploadSuccess }: FileUploaderProps) {
     setProgress(0);
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('entity', entity);
+      const supabase = createClient();
+      const timestamp = Date.now();
+      const fileName = file.name;
+      const storagePath = `${entity}/${timestamp}_${fileName}`;
 
-      // Simulate progress
-      const progressInterval = setInterval(() => {
-        setProgress((prev) => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return 90;
-          }
-          return prev + 10;
+      // Upload to Supabase Storage
+      setProgress(10);
+      toast.loading('Uploading file to storage...', { id: 'upload' });
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('sales-files')
+        .upload(storagePath, file, {
+          cacheControl: '3600',
+          upsert: false,
         });
-      }, 200);
 
-      const response = await fetch('/api/upload', {
+      if (uploadError) {
+        throw new Error(`Storage upload failed: ${uploadError.message}`);
+      }
+
+      setProgress(50);
+      toast.loading('Processing file...', { id: 'upload' });
+
+      // Process the uploaded file
+      const response = await fetch('/api/upload/process', {
         method: 'POST',
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          storagePath: uploadData.path,
+          entity,
+          fileName,
+        }),
       });
 
-      clearInterval(progressInterval);
       setProgress(100);
 
       if (!response.ok) {
@@ -95,21 +111,29 @@ export function FileUploader({ entity, onUploadSuccess }: FileUploaderProps) {
 
       const result = await response.json();
       
-      toast.success(
-        `Successfully uploaded ${result.rowsInserted} rows from ${file.name}`
-      );
+      toast.dismiss('upload');
+      
+      if (result.success) {
+        toast.success(
+          `Successfully uploaded ${result.rowsInserted} rows from ${file.name}`
+        );
 
-      if (onUploadSuccess) {
-        onUploadSuccess();
+        if (onUploadSuccess) {
+          onUploadSuccess();
+        }
+
+        // Reset after 2 seconds
+        setTimeout(() => {
+          setUploadedFile(null);
+          setProgress(0);
+        }, 2000);
+      } else {
+        throw new Error(result.error || 'Processing failed');
       }
-
-      // Reset after 2 seconds
-      setTimeout(() => {
-        setUploadedFile(null);
-        setProgress(0);
-      }, 2000);
     } catch (error) {
       const errorMessage = (error as Error).message || 'Upload failed';
+      
+      toast.dismiss('upload');
       
       // If error dialog is not already open, show it
       if (!errorDialog.open) {
@@ -125,7 +149,7 @@ export function FileUploader({ entity, onUploadSuccess }: FileUploaderProps) {
     } finally {
       setUploading(false);
     }
-  }, [entity, onUploadSuccess]);
+  }, [entity, onUploadSuccess, errorDialog.open]);
 
   const { getRootProps, getInputProps, isDragActive, fileRejections } = useDropzone({
     onDrop,
