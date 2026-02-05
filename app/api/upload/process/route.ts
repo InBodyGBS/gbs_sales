@@ -35,19 +35,19 @@ export async function POST(request: NextRequest) {
 
     // 4. Download file from Supabase Storage
     console.log('📥 Downloading file from storage...');
-    const { data: fileData, error: downloadError } = await supabase.storage
-      .from('sales-files')
-      .download(storagePath);
-
-    if (downloadError || !fileData) {
+    const { downloadFile } = await import('@/lib/utils/storage');
+    
+    let fileData: Blob;
+    try {
+      fileData = await downloadFile(storagePath);
+      console.log('✅ File downloaded successfully');
+    } catch (downloadError) {
       console.error('❌ Download error:', downloadError);
       return NextResponse.json(
-        { success: false, error: 'Failed to download file from storage', details: downloadError?.message },
+        { success: false, error: 'Failed to download file from storage', details: (downloadError as Error).message },
         { status: 500 }
       );
     }
-
-    console.log('✅ File downloaded successfully');
 
     // 5. Convert Blob to ArrayBuffer and parse Excel
     const arrayBuffer = await fileData.arrayBuffer();
