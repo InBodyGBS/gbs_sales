@@ -26,6 +26,7 @@ interface DashboardFiltersProps {
   onQuarterChange: (quarter: string) => void;
   onCountriesChange: (countries: string[]) => void;
   onFGChange: (fg: string) => void;
+  disableEntitySelection?: boolean;
 }
 
 export function DashboardFilters({
@@ -39,6 +40,7 @@ export function DashboardFilters({
   onQuarterChange,
   onCountriesChange,
   onFGChange,
+  disableEntitySelection = false,
 }: DashboardFiltersProps) {
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [availableCountries, setAvailableCountries] = useState<string[]>([]);
@@ -115,33 +117,45 @@ export function DashboardFilters({
           </Select>
         </div>
 
-        <div className="space-y-2">
-          <Label>Entities</Label>
-          <div className="space-y-2 max-h-40 overflow-y-auto border rounded-md p-2">
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="entity-all"
-                checked={isAllSelected}
-                onCheckedChange={() => onEntitiesChange(isAllSelected ? [] : allEntities)}
-              />
-              <label htmlFor="entity-all" className="text-sm cursor-pointer">
-                All
-              </label>
-            </div>
-            {allEntities.map((entity) => (
-              <div key={entity} className="flex items-center space-x-2">
+        {!disableEntitySelection ? (
+          <div className="space-y-2">
+            <Label>Entities</Label>
+            <div className="space-y-2 max-h-40 overflow-y-auto border rounded-md p-2">
+              <div className="flex items-center space-x-2">
                 <Checkbox
-                  id={`entity-${entity}`}
-                  checked={entities.includes(entity)}
-                  onCheckedChange={() => handleEntityToggle(entity)}
+                  id="entity-all"
+                  checked={isAllSelected}
+                  onCheckedChange={() => onEntitiesChange(isAllSelected ? [] : allEntities)}
                 />
-                <label htmlFor={`entity-${entity}`} className="text-sm cursor-pointer">
-                  {entity}
+                <label htmlFor="entity-all" className="text-sm cursor-pointer">
+                  All
                 </label>
               </div>
-            ))}
+              {allEntities.map((entity) => (
+                <div key={entity} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`entity-${entity}`}
+                    checked={entities.includes(entity)}
+                    onCheckedChange={() => handleEntityToggle(entity)}
+                  />
+                  <label htmlFor={`entity-${entity}`} className="text-sm cursor-pointer">
+                    {entity}
+                  </label>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="space-y-2">
+            <Label>Entity</Label>
+            <div className="p-3 border rounded-md bg-muted">
+              <p className="text-sm font-medium">{entities[0] || 'N/A'}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Entity is fixed for this dashboard
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="pt-4 border-t">
           <button

@@ -1,189 +1,149 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { DashboardFilters } from '@/components/dashboard/DashboardFilters';
-import { KPICards } from '@/components/dashboard/KPICards';
-import { MonthlyTrendChart } from '@/components/charts/MonthlyTrendChart';
-import { QuarterlyComparisonChart } from '@/components/charts/QuarterlyComparisonChart';
-import { FGDistributionChart } from '@/components/charts/FGDistributionChart';
-import { EntitySalesChart } from '@/components/charts/EntitySalesChart';
-import { CountrySalesChart } from '@/components/charts/CountrySalesChart';
-import { TopProductsChart } from '@/components/charts/TopProductsChart';
-import { IndustryBreakdownChart } from '@/components/charts/IndustryBreakdownChart';
-import { SalesDataTable } from '@/components/dashboard/SalesDataTable';
+import { useRouter } from 'next/navigation';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Building2, ArrowRight, Loader2 } from 'lucide-react';
 import { Entity } from '@/lib/types/sales';
 import toast from 'react-hot-toast';
 
+const ENTITIES: Entity[] = ['HQ', 'USA', 'BWA', 'Vietnam', 'Healthcare', 'Korot'];
+
+const ENTITY_DISPLAY_NAMES: Record<Entity, string> = {
+  HQ: 'HQ',
+  USA: 'USA',
+  BWA: 'BWA',
+  Vietnam: 'Vietnam',
+  Healthcare: 'Healthcare',
+  Korot: 'Korot',
+  All: 'All',
+};
+
 export default function DashboardPage() {
-  const [year, setYear] = useState<string>('');
-  const [entities, setEntities] = useState<Entity[]>([]);
-  const [quarter, setQuarter] = useState<string>('All');
-  const [countries, setCountries] = useState<string[]>([]);
-  const [fg, setFG] = useState<string>('All');
-  
+  const router = useRouter();
+  const [availableEntities, setAvailableEntities] = useState<Entity[]>([]);
   const [loading, setLoading] = useState(true);
-  const [kpiData, setKpiData] = useState<any>(null);
-  const [monthlyTrend, setMonthlyTrend] = useState<any[]>([]);
-  const [quarterlyComparison, setQuarterlyComparison] = useState<any[]>([]);
-  const [fgDistribution, setFGDistribution] = useState<any[]>([]);
-  const [entitySales, setEntitySales] = useState<any[]>([]);
-  const [countrySales, setCountrySales] = useState<any[]>([]);
-  const [topProducts, setTopProducts] = useState<any[]>([]);
-  const [industryBreakdown, setIndustryBreakdown] = useState<any[]>([]);
 
   useEffect(() => {
-    fetchYears();
+    fetchAvailableEntities();
   }, []);
 
-  useEffect(() => {
-    if (year) {
-      fetchAllData();
-    }
-  }, [year, entities, quarter, countries, fg]);
-
-  const fetchYears = async () => {
+  const fetchAvailableEntities = async () => {
     try {
-      const res = await fetch('/api/years');
-      const data = await res.json();
-      if (data.years && data.years.length > 0 && !year) {
-        setYear(String(data.years[0]));
-      }
+      // Check which entities have data by fetching years for each entity
+      const entityChecks = await Promise.all(
+        ENTITIES.map(async (entity) => {
+          try {
+            const res = await fetch(`/api/years?entity=${entity}`);
+            const data = await res.json();
+            return data.years && data.years.length > 0 ? entity : null;
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      const available = entityChecks.filter((e): e is Entity => e !== null);
+      setAvailableEntities(available.length > 0 ? available : ENTITIES);
     } catch (error) {
-      console.error('Failed to fetch years:', error);
-    }
-  };
-
-  const fetchAllData = async () => {
-    setLoading(true);
-    try {
-      const entityParam = entities.length === 0 || entities.length === 6 ? 'All' : entities.join(',');
-      
-      const [
-        kpiRes,
-        monthlyRes,
-        quarterlyRes,
-        fgRes,
-        entityRes,
-        countryRes,
-        productsRes,
-        industryRes,
-      ] = await Promise.all([
-        fetch(`/api/dashboard/summary?year=${year}&entities=${entityParam}`),
-        fetch(`/api/dashboard/monthly-trend?year=${year}&entities=${entityParam}`),
-        fetch(`/api/dashboard/quarterly-comparison?year=${year}&entities=${entityParam}`),
-        fetch(`/api/dashboard/fg-distribution?year=${year}&entities=${entityParam}`),
-        fetch(`/api/dashboard/entity-sales?year=${year}`),
-        fetch(`/api/dashboard/country-sales?year=${year}&limit=10&entities=${entityParam}`),
-        fetch(`/api/dashboard/top-products?year=${year}&limit=10&entities=${entityParam}`),
-        fetch(`/api/dashboard/industry-breakdown?year=${year}&entities=${entityParam}`),
-      ]);
-
-      if (!kpiRes.ok) throw new Error('Failed to fetch KPI data');
-      if (!monthlyRes.ok) throw new Error('Failed to fetch monthly trend');
-      if (!quarterlyRes.ok) throw new Error('Failed to fetch quarterly comparison');
-      if (!fgRes.ok) throw new Error('Failed to fetch FG distribution');
-      if (!entityRes.ok) throw new Error('Failed to fetch entity sales');
-      if (!countryRes.ok) throw new Error('Failed to fetch country sales');
-      if (!productsRes.ok) throw new Error('Failed to fetch top products');
-      if (!industryRes.ok) throw new Error('Failed to fetch industry breakdown');
-
-      setKpiData(await kpiRes.json());
-      setMonthlyTrend(await monthlyRes.json());
-      setQuarterlyComparison(await quarterlyRes.json());
-      setFGDistribution(await fgRes.json());
-      setEntitySales(await entityRes.json());
-      setCountrySales(await countryRes.json());
-      setTopProducts(await productsRes.json());
-      setIndustryBreakdown(await industryRes.json());
-    } catch (error) {
-      toast.error('Failed to load dashboard data');
-      console.error('Failed to fetch data:', error);
+      console.error('Failed to fetch available entities:', error);
+      // Fallback to all entities if API fails
+      setAvailableEntities(ENTITIES);
     } finally {
       setLoading(false);
     }
   };
 
-  if (!year) {
+  const handleEntitySelect = (entity: Entity) => {
+    router.push(`/dashboard/${entity}`);
+  };
+
+  if (loading) {
     return (
       <div className="container mx-auto py-8">
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">
-            No data available. Please upload sales data first.
-          </p>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto py-8 space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Sales Dashboard</h1>
-          <p className="text-muted-foreground mt-2">
-            Analyze sales performance across entities and time periods
+    <div className="container mx-auto py-8">
+      <div className="max-w-4xl mx-auto">
+        {/* Header */}
+        <div className="text-center mb-12">
+          <h1 className="text-4xl font-bold mb-4">Sales Dashboard</h1>
+          <p className="text-muted-foreground text-lg">
+            Select an entity to view its sales dashboard
           </p>
         </div>
-      </div>
 
-      <div className="grid gap-6 lg:grid-cols-4">
-        {/* Filters Sidebar */}
-        <div className="lg:col-span-1">
-          <DashboardFilters
-            year={year}
-            entities={entities}
-            quarter={quarter}
-            countries={countries}
-            fg={fg}
-            onYearChange={setYear}
-            onEntitiesChange={setEntities}
-            onQuarterChange={setQuarter}
-            onCountriesChange={setCountries}
-            onFGChange={setFG}
-          />
+        {/* Entity Cards Grid */}
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {ENTITIES.map((entity) => {
+            const hasData = availableEntities.includes(entity);
+            return (
+              <Card
+                key={entity}
+                className={`p-6 cursor-pointer transition-all hover:shadow-lg ${
+                  hasData
+                    ? 'hover:border-primary'
+                    : 'opacity-60 cursor-not-allowed'
+                }`}
+                onClick={() => hasData && handleEntitySelect(entity)}
+              >
+                <div className="flex flex-col items-center text-center space-y-4">
+                  <div
+                    className={`p-4 rounded-full ${
+                      hasData ? 'bg-primary/10' : 'bg-muted'
+                    }`}
+                  >
+                    <Building2
+                      className={`h-8 w-8 ${
+                        hasData ? 'text-primary' : 'text-muted-foreground'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-semibold mb-1">
+                      {ENTITY_DISPLAY_NAMES[entity]}
+                    </h3>
+                    {!hasData && (
+                      <p className="text-sm text-muted-foreground">
+                        No data available
+                      </p>
+                    )}
+                  </div>
+                  {hasData && (
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEntitySelect(entity);
+                      }}
+                    >
+                      View Dashboard
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
         </div>
 
-        {/* Main Content */}
-        <div className="lg:col-span-3 space-y-6">
-          {/* KPI Cards */}
-          <KPICards data={kpiData} loading={loading} />
-
-          {/* Time Trend Section */}
-          <div className="grid gap-6 md:grid-cols-2">
-            <MonthlyTrendChart data={monthlyTrend} loading={loading} />
-            <QuarterlyComparisonChart
-              data={quarterlyComparison}
-              currentYear={parseInt(year)}
-              loading={loading}
-            />
+        {availableEntities.length === 0 && (
+          <div className="mt-12 text-center">
+            <Card className="p-8">
+              <p className="text-muted-foreground">
+                No sales data available. Please upload data first.
+              </p>
+            </Card>
           </div>
-
-          {/* FG & Entity Section */}
-          <div className="grid gap-6 md:grid-cols-2">
-            <FGDistributionChart data={fgDistribution} loading={loading} />
-            <EntitySalesChart data={entitySales} loading={loading} />
-          </div>
-
-          {/* Geographic & Product Section */}
-          <div className="grid gap-6 md:grid-cols-2">
-            <CountrySalesChart data={countrySales} loading={loading} />
-            <TopProductsChart data={topProducts} loading={loading} />
-          </div>
-
-          {/* Industry Analysis Section */}
-          <IndustryBreakdownChart data={industryBreakdown} loading={loading} />
-
-          {/* Data Table Section */}
-          <SalesDataTable
-            year={year}
-            entities={entities}
-            quarter={quarter}
-            countries={countries}
-            fg={fg}
-            loading={loading}
-          />
-        </div>
+        )}
       </div>
     </div>
   );
