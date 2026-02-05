@@ -15,7 +15,6 @@ import {
 } from '@/components/ui/dialog';
 import { Upload, File, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Entity } from '@/lib/types/sales';
-import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 
 interface FileUploaderProps {
@@ -47,42 +46,29 @@ export function FileUploader({ entity, onUploadSuccess }: FileUploaderProps) {
     setProgress(0);
 
     try {
-      const supabase = createClient();
-      const timestamp = Date.now();
-      const fileName = file.name;
-      const storagePath = `${entity}/${timestamp}_${fileName}`;
-
-      // Upload to Supabase Storage
-      setProgress(10);
-      toast.loading('Uploading file to storage...', { id: 'upload' });
-
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('sales-files')
-        .upload(storagePath, file, {
-          cacheControl: '3600',
-          upsert: false,
+      // Simulate progress
+      const progressInterval = setInterval(() => {
+        setProgress((prev) => {
+          if (prev >= 90) {
+            clearInterval(progressInterval);
+            return 90;
+          }
+          return prev + 10;
         });
+      }, 200);
 
-      if (uploadError) {
-        throw new Error(`Storage upload failed: ${uploadError.message}`);
-      }
+      toast.loading('Uploading file...', { id: 'upload' });
 
-      setProgress(50);
-      toast.loading('Processing file...', { id: 'upload' });
+      // Upload directly using the new API endpoint
+      const formData = new FormData();
+      formData.append('file', file);
 
-      // Process the uploaded file
-      const response = await fetch('/api/upload/process', {
+      const response = await fetch(`/api/upload/${entity}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          storagePath: uploadData.path,
-          entity,
-          fileName,
-        }),
+        body: formData,
       });
 
+      clearInterval(progressInterval);
       setProgress(100);
 
       if (!response.ok) {
