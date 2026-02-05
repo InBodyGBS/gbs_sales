@@ -2,7 +2,8 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { formatCurrency, formatNumber } from '@/lib/utils/formatters';
+import { formatCurrency, formatNumber, formatKRW } from '@/lib/utils/formatters';
+import { Entity } from '@/lib/types/sales';
 
 interface MonthlyTrendData {
   month: number;
@@ -13,11 +14,13 @@ interface MonthlyTrendData {
 interface MonthlyTrendChartProps {
   data: MonthlyTrendData[];
   loading?: boolean;
+  entity?: Entity;
 }
 
 const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
 
-export function MonthlyTrendChart({ data, loading }: MonthlyTrendChartProps) {
+export function MonthlyTrendChart({ data, loading, entity }: MonthlyTrendChartProps) {
+  const isHQ = entity === 'HQ';
   if (loading) {
     return (
       <Card>
@@ -54,6 +57,10 @@ export function MonthlyTrendChart({ data, loading }: MonthlyTrendChartProps) {
     qty: item.qty,
   }));
 
+  // Calculate max amount for better Y-axis scaling
+  const maxAmount = Math.max(...chartData.map((d) => d.amount), 0);
+  const yAxisDomain = [0, maxAmount * 1.1]; // Add 10% padding
+
   return (
     <Card>
       <CardHeader>
@@ -65,43 +72,67 @@ export function MonthlyTrendChart({ data, loading }: MonthlyTrendChartProps) {
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="month" />
-            <YAxis
-              yAxisId="left"
-              orientation="left"
-              tickFormatter={(value) => formatCurrency(value, 'USD')}
-            />
-            <YAxis
-              yAxisId="right"
-              orientation="right"
-              tickFormatter={(value) => formatNumber(value)}
-            />
-            <Tooltip
-              formatter={(value: number, name: string) => {
-                if (name === 'amount') {
-                  return formatCurrency(value, 'USD');
-                }
-                return formatNumber(value);
-              }}
-            />
-            <Legend />
-            <Line
-              yAxisId="left"
-              type="monotone"
-              dataKey="amount"
-              stroke="#3B82F6"
-              strokeWidth={2}
-              name="Amount"
-              dot={{ r: 4 }}
-            />
-            <Line
-              yAxisId="right"
-              type="monotone"
-              dataKey="qty"
-              stroke="#10B981"
-              strokeWidth={2}
-              name="Qty"
-              dot={{ r: 4 }}
-            />
+            {isHQ ? (
+              <>
+                <YAxis
+                  domain={yAxisDomain}
+                  tickFormatter={(value) => formatKRW(value)}
+                />
+                <Tooltip
+                  formatter={(value: number) => formatKRW(value)}
+                />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="amount"
+                  stroke="#3B82F6"
+                  strokeWidth={2}
+                  name="Amount"
+                  dot={{ r: 4 }}
+                />
+              </>
+            ) : (
+              <>
+                <YAxis
+                  yAxisId="left"
+                  orientation="left"
+                  domain={yAxisDomain}
+                  tickFormatter={(value) => formatCurrency(value, 'USD')}
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  tickFormatter={(value) => formatNumber(value)}
+                />
+                <Tooltip
+                  formatter={(value: number, name: string) => {
+                    if (name === 'amount') {
+                      return formatCurrency(value, 'USD');
+                    }
+                    return formatNumber(value);
+                  }}
+                />
+                <Legend />
+                <Line
+                  yAxisId="left"
+                  type="monotone"
+                  dataKey="amount"
+                  stroke="#3B82F6"
+                  strokeWidth={2}
+                  name="Amount"
+                  dot={{ r: 4 }}
+                />
+                <Line
+                  yAxisId="right"
+                  type="monotone"
+                  dataKey="qty"
+                  stroke="#10B981"
+                  strokeWidth={2}
+                  name="Qty"
+                  dot={{ r: 4 }}
+                />
+              </>
+            )}
           </LineChart>
         </ResponsiveContainer>
       </CardContent>

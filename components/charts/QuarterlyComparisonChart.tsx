@@ -2,7 +2,8 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { formatCurrency } from '@/lib/utils/formatters';
+import { formatCurrency, formatKRW } from '@/lib/utils/formatters';
+import { Entity } from '@/lib/types/sales';
 
 interface QuarterlyComparisonData {
   quarter: string;
@@ -14,9 +15,11 @@ interface QuarterlyComparisonChartProps {
   data: QuarterlyComparisonData[];
   currentYear: number;
   loading?: boolean;
+  entity?: Entity;
 }
 
-export function QuarterlyComparisonChart({ data, currentYear, loading }: QuarterlyComparisonChartProps) {
+export function QuarterlyComparisonChart({ data, currentYear, loading, entity }: QuarterlyComparisonChartProps) {
+  const isHQ = entity === 'HQ';
   if (loading) {
     return (
       <Card>
@@ -53,6 +56,13 @@ export function QuarterlyComparisonChart({ data, currentYear, loading }: Quarter
     [(currentYear - 1).toString()]: item.previousYear,
   }));
 
+  // Calculate max value for better Y-axis scaling
+  const maxValue = Math.max(
+    ...chartData.flatMap((d) => [d[currentYear.toString()] || 0, d[(currentYear - 1).toString()] || 0]),
+    0
+  );
+  const yAxisDomain = [0, maxValue * 1.1]; // Add 10% padding
+
   return (
     <Card>
       <CardHeader>
@@ -64,8 +74,13 @@ export function QuarterlyComparisonChart({ data, currentYear, loading }: Quarter
           <BarChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="quarter" />
-            <YAxis tickFormatter={(value) => formatCurrency(value, 'USD')} />
-            <Tooltip formatter={(value: number) => formatCurrency(value, 'USD')} />
+            <YAxis
+              domain={yAxisDomain}
+              tickFormatter={(value) => isHQ ? formatKRW(value) : formatCurrency(value, 'USD')}
+            />
+            <Tooltip
+              formatter={(value: number) => isHQ ? formatKRW(value) : formatCurrency(value, 'USD')}
+            />
             <Legend />
             <Bar
               dataKey={currentYear.toString()}

@@ -198,15 +198,16 @@ export default function EntityDashboardPage() {
         {/* Main Content */}
         <div className="lg:col-span-3 space-y-6">
           {/* KPI Cards */}
-          <KPICards data={kpiData} loading={loading} />
+          <KPICards data={kpiData} loading={loading} entity={entity} />
 
           {/* Time Trend Section */}
           <div className="grid gap-6 md:grid-cols-2">
-            <MonthlyTrendChart data={monthlyTrend} loading={loading} />
+            <MonthlyTrendChart data={monthlyTrend} loading={loading} entity={entity} />
             <QuarterlyComparisonChart
               data={quarterlyComparison}
               currentYear={parseInt(year)}
               loading={loading}
+              entity={entity}
             />
           </div>
 

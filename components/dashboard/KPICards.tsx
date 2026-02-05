@@ -2,7 +2,8 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DollarSign, Package, TrendingUp, FileText, ArrowUp, ArrowDown } from 'lucide-react';
-import { formatCurrency, formatNumber } from '@/lib/utils/formatters';
+import { formatCurrency, formatNumber, formatKRW } from '@/lib/utils/formatters';
+import { Entity } from '@/lib/types/sales';
 
 interface KPICardsProps {
   data: {
@@ -16,13 +17,17 @@ interface KPICardsProps {
     };
   } | null;
   loading?: boolean;
+  entity?: Entity;
 }
 
-export function KPICards({ data, loading }: KPICardsProps) {
+export function KPICards({ data, loading, entity }: KPICardsProps) {
+  const isHQ = entity === 'HQ';
+  
   if (loading) {
+    const cardCount = isHQ ? 1 : 4;
     return (
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {[1, 2, 3, 4].map((i) => (
+      <div className={`grid gap-4 ${isHQ ? 'md:grid-cols-1' : 'md:grid-cols-2 lg:grid-cols-4'}`}>
+        {Array.from({ length: cardCount }).map((_, i) => (
           <Card key={i}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">
@@ -42,6 +47,33 @@ export function KPICards({ data, loading }: KPICardsProps) {
     return null;
   }
 
+  // For HQ, only show Total Amount with KRW format (no currency symbol)
+  if (isHQ) {
+    return (
+      <div className="grid gap-4 md:grid-cols-1">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Amount</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatKRW(data.totalAmount)}</div>
+            <div className={`flex items-center text-xs mt-1 ${data.comparison.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {data.comparison.amount >= 0 ? (
+                <ArrowUp className="h-3 w-3 mr-1" />
+              ) : (
+                <ArrowDown className="h-3 w-3 mr-1" />
+              )}
+              <span>{Math.abs(data.comparison.amount).toFixed(1)}% vs previous period</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Total sales amount (KRW)</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // For other entities, show all cards
   const cards = [
     {
       title: 'Total Amount',
