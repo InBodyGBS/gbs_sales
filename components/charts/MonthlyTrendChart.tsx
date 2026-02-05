@@ -51,15 +51,25 @@ export function MonthlyTrendChart({ data, loading, entity }: MonthlyTrendChartPr
     );
   }
 
-  const chartData = data.map((item) => ({
-    month: monthNames[item.month - 1],
-    amount: item.amount,
-    qty: item.qty,
-  }));
+  // Create a map of existing data by month
+  const dataMap = new Map(
+    data.map((item) => [item.month, { amount: item.amount, qty: item.qty }])
+  );
+
+  // Create chart data for all 12 months, filling missing months with 0
+  const chartData = monthNames.map((monthName, index) => {
+    const month = index + 1;
+    const monthData = dataMap.get(month);
+    return {
+      month: monthName,
+      amount: monthData?.amount || 0,
+      qty: monthData?.qty || 0,
+    };
+  });
 
   // Calculate max amount for better Y-axis scaling
   const maxAmount = Math.max(...chartData.map((d) => d.amount), 0);
-  const yAxisDomain = [0, maxAmount * 1.1]; // Add 10% padding
+  const yAxisDomain = [0, maxAmount * 1.1 || 1]; // Add 10% padding, minimum 1 to avoid domain error
 
   return (
     <Card>
@@ -71,7 +81,14 @@ export function MonthlyTrendChart({ data, loading, entity }: MonthlyTrendChartPr
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="month" />
+            <XAxis 
+              dataKey="month"
+              ticks={monthNames}
+              interval={0}
+              angle={-45}
+              textAnchor="end"
+              height={60}
+            />
             {isKRWEntity ? (
               <>
                 <YAxis
